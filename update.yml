@@ -1,0 +1,35 @@
+name: 四川废料报价每日更新
+
+# 每 4 小时左右刷新一次报价数据到 ntfy，手机打开的固定网页就能一直看到当日价。
+# GitHub Actions 的 cron 用 UTC（世界时），比北京时间慢 8 小时，下面已换算好：
+#   00:00 UTC = 北京 08:00
+#   02:40 UTC = 北京 10:40
+#   10:00 UTC = 北京 18:00
+#   14:00 UTC = 北京 22:00
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+    - cron: '40 2 * * *'
+    - cron: '0 10 * * *'
+    - cron: '0 14 * * *'
+  workflow_dispatch:   # 允许在 Actions 页面手动点一下立即运行（测试用）
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 抓取报价并写入 ntfy
+        run: python cloud_price.py
