@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+ # -*- coding: utf-8 -*-
 """
 四川废旧物资报价 · 云端定时版（供 GitHub Actions 运行）
 =========================================================
@@ -100,6 +100,9 @@ def parse_items(payload):
             continue
         low = float(m.group('low'))
         high = float(m.group('high')) if m.group('high') else low
+        # 源站偶尔把价格区间写反（如「铝合金17700-17000」），低价高于高价时兜底交换
+        if high < low:
+            low, high = high, low
         items.append({
             'name': m.group('name').strip(' ：:'),
             'low': low, 'high': high,
