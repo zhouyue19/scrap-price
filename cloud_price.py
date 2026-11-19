@@ -29,7 +29,7 @@ CN_TZ = dt.timezone(dt.timedelta(hours=8))
 UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 HEADERS = {'User-Agent': UA, 'Accept-Language': 'zh-CN,zh;q=0.9'}
-TIMEOUT = 25
+TIMEOUT = 40
 
 SECTION_ORDER = ['废铜', '废铝', '废电瓶', '废不锈钢']
 ACCENT = {'废铜': '#b45309', '废铝': '#0f766e', '废电瓶': '#1d4ed8', '废不锈钢': '#6d28d9'}
@@ -321,6 +321,35 @@ def build_payload(fj_rows, qdate, fallback, sd, futures):
     }
 
 
+def last_good_payload():
+    """从 ntfy 读回上一条含完整 sections 的数据，供云端抓不到废料时续期。
+    找不到返回 None。"""
+    # 必须带 poll=1：ntfy 的 /json 端点只有 poll=1 才立即返回历史消息，否则会挂住等新消息
+    read_url = f'{NTFY_API}/{NTFY_TOPIC}/json?poll=1&since=12h'
+    for attempt in range(3):
+        try:
+            r = requests.get(read_url, headers={'User-Agent': UA}, timeout=25)
+            if r.status_code != 200:
+                log('  读回 ntfy 非200:', r.status_code)
+                time.sleep(3)
+                continue
+            lines = [x for x in r.text.split('\n') if x.strip()]
+            for line in reversed(lines):
+                try:
+                    o = json.loads(line)
+                    p = json.loads(o.get('message', '{}'))
+                    if p.get('sections'):
+                        log('  找到上一条完整数据，报价日:', p.get('quote_date', ''))
+                        return p
+                except Exception:
+                    continue
+            return None  # 有响应但没有完整数据
+        except Exception as e:
+            log('  读回 ntfy 失败，重试', attempt + 1, type(e).__name__, str(e)[:50])
+            time.sleep(3)
+    return None
+
+
 def publish(body):
     last = ''
     for attempt in range(3):
@@ -358,11 +387,21 @@ def main():
     futures = fetch_futures()
     log('  期货条数:', len(futures))
 
-    if not fj_rows and not futures:
-        log('!! 一个数据都没抓到，放弃写入（避免用空数据覆盖页面）')
-        sys.exit(1)
+    if not fj_rows:
+        # 云端常被源站限流/拦截，抓不到废料时绝不能写空数据覆盖页面。
+        # 策略：读回 ntfy 上一条完整数据，续上保留期（顺带刷新期货和时间）。
+        log('!! 没抓到废料数据，尝试复用上一条完整数据续期')
+        prev = last_good_payload()
+        if prev is None:
+            log('!! 也没有可复用的历史数据，放弃写入（保持页面原样）')
+            sys.exit(1)
+        if futures:
+            prev['futures'] = futures
+        prev['fetched_at'] = dt.datetime.now(CN_TZ).strftime('%m-%d %H:%M')
+        payload = prev
+    else:
+        payload = build_payload(fj_rows, qdate, fallback, sd, futures)
 
-    payload = build_payload(fj_rows, qdate, fallback, sd, futures)
     body = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
     log('  数据大小:', len(body), '字节')
     if len(body) > 4000:
