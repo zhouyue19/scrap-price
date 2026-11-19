@@ -1,8 +1,8 @@
- # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
-四川废旧物资报价 · 云端定时版（供 GitHub Actions 运行）
+雅安废料报价 · 云端定时版（供 GitHub Actions 运行）
 =========================================================
-每次运行：抓取四川废料报价 -> 压缩成一条 JSON -> 写入 ntfy.sh。
+每次运行：抓取中国废品网「雅安」每日废料报价 -> 压缩成一条 JSON -> 写入 ntfy.sh。
 手机打开那个固定网址（页面外壳只发一次）时，JS 去 ntfy 取最新一条显示。
 
 本文件自包含，不依赖本机的任何其他文件。只依赖 requests。
@@ -31,8 +31,9 @@ UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 HEADERS = {'User-Agent': UA, 'Accept-Language': 'zh-CN,zh;q=0.9'}
 TIMEOUT = 40
 
-SECTION_ORDER = ['废铜', '废铝', '废电瓶', '废不锈钢']
-ACCENT = {'废铜': '#b45309', '废铝': '#0f766e', '废电瓶': '#1d4ed8', '废不锈钢': '#6d28d9'}
+SECTION_ORDER = ['废铜', '废铝', '废钢', '废不锈钢', '废铁', '废铅', '废锌', '废纸']
+ACCENT = {'废铜': '#b45309', '废铝': '#0f766e', '废钢': '#0e7490', '废不锈钢': '#6d28d9',
+          '废铁': '#78716c', '废铅': '#1d4ed8', '废锌': '#7c3aed', '废纸': '#059669'}
 
 
 def log(*a):
@@ -111,6 +112,82 @@ def parse_items(payload):
             'unit_raw': m.group('unit') or '',
         })
     return items
+
+
+# ============================ 中国废品网 雅安频道（主源，元/吨） ============================
+# 雅安本地每日报价专页，地区码 a=6017。列表页每日更新，需从中提取各品类最新文章 id。
+ZGFP_LIST = ('https://www.zgfp.com/search/searchprice.aspx?page=1&ChannelId=8'
+             '&cid=0&k=&w=&e=2&d=&a=6017')
+ZGFP_VIEW = 'https://www.zgfp.com/price/View/{ch}/{aid}.htm'
+ZGFP_CATS = [('废铜', 61, '铜'), ('废铝', 40, '铝'),
+             ('废钢', 12, '钢'), ('废不锈钢', 39, '不锈钢')]
+ZGFP_EXTRA = [('废铁', 14), ('废铅', 19), ('废锌', 17), ('废纸', 22)]
+ZGFP_DATE_RE = re.compile(r'(\d{4})年(\d{1,2})月(\d{1,2})日')
+
+
+def parse_zgfp_table(detail):
+    """解析详情页 table 的 品种/最低价/最高价，返回统一条目 dict"""
+    items = []
+    for tr in re.findall(r'<TR[^>]*>(.*?)</TR>', detail, flags=re.S | re.I):
+        cells = re.findall(r'<TD[^>]*>(.*?)</TD>', tr, flags=re.S | re.I)
+        if len(cells) < 3:
+            continue
+        name = re.sub(r'<[^>]+>', '', cells[0]).strip()
+        lo = re.sub(r'<[^>]+>', '', cells[1]).strip()
+        hi = re.sub(r'<[^>]+>', '', cells[2]).strip()
+        try:
+            low, high = float(lo), float(hi)
+        except ValueError:
+            continue
+        if not name or name in ('品种', '指数名称'):
+            continue
+        if high < low:
+            low, high = high, low
+        items.append({'name': name, 'low': low, 'high': high,
+                      'dir': '', 'chg': None, 'unit_raw': '吨'})
+    return items
+
+
+def zgfp_yaan(want_date=None):
+    """返回 (rows, qdate, fallback, extra)。rows 带 section 字段，extra 是补充品类 dict。"""
+    html = fetch(ZGFP_LIST, encoding='gbk')
+    if not html:
+        return [], None, True, {}
+    pairs = re.findall(r'href="([^"]*price/View/(\d+)/(\d+)\.htm)"[^>]*>([^<]{4,60})', html)
+    target = want_date or dt.datetime.now(CN_TZ).date()
+    groups = {}
+    for href, ch, aid, title in pairs:
+        m = ZGFP_DATE_RE.search(title)
+        if not m:
+            continue
+        d = dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        if d > target:
+            continue
+        groups.setdefault(d, []).append((ch, aid, title.strip()))
+    if not groups:
+        return [], None, True, {}
+    qdate = max(groups)
+    fallback = qdate < target
+    by_ch = {}
+    for ch, aid, title in groups[qdate]:
+        by_ch.setdefault(ch, (aid, title))
+    cat_map = {str(cid): (sec, metal) for sec, cid, metal in ZGFP_CATS}
+    extra_map = {str(cid): sec for sec, cid in ZGFP_EXTRA}
+    rows, extra = [], {}
+    for ch, (aid, _title) in by_ch.items():
+        detail = fetch(ZGFP_VIEW.format(ch=ch, aid=aid), encoding='gbk')
+        if not detail:
+            continue
+        items = parse_zgfp_table(detail)
+        if not items:
+            continue
+        if ch in cat_map:
+            sec, metal = cat_map[ch]
+            for it in items:
+                rows.append(dict(section=sec, metal=metal, region='雅安', **it))
+        elif ch in extra_map:
+            extra[extra_map[ch]] = items
+    return rows, qdate, fallback, extra
 
 
 FJ139_SEARCH = 'https://www.fj139.com/news/search.php?kw='
@@ -292,34 +369,30 @@ def to_kg(values, unit_raw, section):
 
 # ============================ 组装 + 推送 ntfy ============================
 
-def build_payload(fj_rows, qdate, fallback, sd, futures):
-    # 先按板块分组并换算成元/公斤
+def build_payload(rows, qdate, fallback, futures):
+    """把雅安条目压成前端要用的纯 JSON（体积压到 ntfy 单条上限内）。"""
     grouped = {}
-    for r in fj_rows:
+    for r in rows:
         kg = to_kg([r['low'], r['high']], r['unit_raw'], r['section'])
-        chg_kg = None
-        if r['chg'] is not None:
+        o = {'name': r['name'], 'low': kg[0], 'high': kg[1]}
+        # 元/吨前端可由元/公斤×1000 推出，不重复传；雅安源也没有涨跌字段
+        if r.get('dir') or r.get('chg') is not None:
             chg_kg = r['chg'] / 1000 if r['unit_raw'] not in ('公斤', '千克') else r['chg']
-        grouped.setdefault(r['section'], []).append({
-            'name': r['name'], 'low': kg[0], 'high': kg[1],
-            'low_t': r['low'], 'high_t': r['high'],
-            'dir': r['dir'], 'chg': chg_kg,
-        })
+            o['dir'] = r['dir']
+            o['chg'] = chg_kg
+        grouped.setdefault(r['section'], []).append(o)
     secs = []
     for sec in SECTION_ORDER:
         items = grouped.get(sec) or []
         if not items:
             continue
         secs.append({'name': sec, 'accent': ACCENT.get(sec, '#1f3b57'), 'rows': items})
-    sd = sd or {}
     return {
         'quote_date': qdate.strftime('%Y-%m-%d') if qdate else '',
         'is_fallback': bool(fallback),
         'fetched_at': dt.datetime.now(CN_TZ).strftime('%m-%d %H:%M'),
         'sections': secs,
-        'chengdu': {'date': sd.get('date') or '',
-                    'cu': [[k, v] for k, v in (sd.get('cu_kg') or {}).items()],
-                    'steel': [[k, v] for k, v in (sd.get('steel_per_t') or {}).items()]},
+        'chengdu': {'date': '', 'cu': [], 'steel': []},
         'futures': futures,
     }
 
@@ -374,24 +447,18 @@ def publish(body):
 
 def main():
     log('=== 开始抓取（云端）===')
-    picked = fj139_pick_article()
-    fj_rows, qdate, fallback = [], None, False
-    if picked:
-        qdate, iid, title, ok = picked
-        fallback = not ok
-        log('文章:', title[:40], '回退' if fallback else '当日')
-        txt = html_to_text(fetch(FJ139_ITEM.format(iid), referer='https://www.fj139.com/'))
-        fj_rows = parse_fj139_sichuan(txt) if txt else []
-    log('  废铜/铝/电瓶/不锈钢条目数:', len(fj_rows))
-
-    sd = sdjinshu_chengdu()
-    log('  成都现货品名数:', len((sd or {}).get('cu_kg') or {}))
+    rows, qdate, fallback, extra = zgfp_yaan()
+    # 补充品类（废铁/铅/锌/纸）也归入 rows 一起展示
+    for sec, items in extra.items():
+        for it in items:
+            rows.append(dict(section=sec, metal=sec, region='雅安', **it))
+    log('  雅安废料条目数:', len(rows), '报价日:', qdate)
 
     futures = fetch_futures()
     log('  期货条数:', len(futures))
 
-    if not fj_rows:
-        # 云端常被源站限流/拦截，抓不到废料时绝不能写空数据覆盖页面。
+    if not rows:
+        # 云端偶尔被源站限流，抓不到废料时绝不能写空数据覆盖页面。
         # 策略：读回 ntfy 上一条完整数据，续上保留期（顺带刷新期货和时间）。
         log('!! 没抓到废料数据，尝试复用上一条完整数据续期')
         prev = last_good_payload()
@@ -403,7 +470,7 @@ def main():
         prev['fetched_at'] = dt.datetime.now(CN_TZ).strftime('%m-%d %H:%M')
         payload = prev
     else:
-        payload = build_payload(fj_rows, qdate, fallback, sd, futures)
+        payload = build_payload(rows, qdate, fallback, futures)
 
     body = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
     log('  数据大小:', len(body), '字节')
