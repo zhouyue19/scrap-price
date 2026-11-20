@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-雅安废料报价 · 云端定时版（供 GitHub Actions 运行）
+成都废料报价 · 云端定时版（供 GitHub Actions 运行）
 =========================================================
-每次运行：抓取中国废品网「雅安」每日废料报价 -> 压缩成一条 JSON -> 写入 ntfy.sh。
+每次运行：抓取中国废品网「成都」每日废料报价 -> 压缩成一条 JSON -> 写入 ntfy.sh。
 手机打开那个固定网址（页面外壳只发一次）时，JS 去 ntfy 取最新一条显示。
 
 本文件自包含，不依赖本机的任何其他文件。只依赖 requests。
@@ -114,10 +114,10 @@ def parse_items(payload):
     return items
 
 
-# ============================ 中国废品网 雅安频道（主源，元/吨） ============================
-# 雅安本地每日报价专页，地区码 a=6017。列表页每日更新，需从中提取各品类最新文章 id。
+# ============================ 中国废品网 成都频道（主源，元/吨） ============================
+# 成都本地每日报价专页，地区码 a=6002。列表页每日更新，需从中提取各品类最新文章 id。
 ZGFP_LIST = ('https://www.zgfp.com/search/searchprice.aspx?page=1&ChannelId=8'
-             '&cid=0&k=&w=&e=2&d=&a=6017')
+             '&cid=0&k=&w=&e=2&d=&a=6002')
 ZGFP_VIEW = 'https://www.zgfp.com/price/View/{ch}/{aid}.htm'
 ZGFP_CATS = [('废铜', 61, '铜'), ('废铝', 40, '铝'),
              ('废钢', 12, '钢'), ('废不锈钢', 39, '不锈钢')]
@@ -148,7 +148,7 @@ def parse_zgfp_table(detail):
     return items
 
 
-def zgfp_yaan(want_date=None):
+def zgfp_chengdu(want_date=None):
     """返回 (rows, qdate, fallback, extra)。rows 带 section 字段，extra 是补充品类 dict。"""
     html = fetch(ZGFP_LIST, encoding='gbk')
     if not html:
@@ -184,7 +184,7 @@ def zgfp_yaan(want_date=None):
         if ch in cat_map:
             sec, metal = cat_map[ch]
             for it in items:
-                rows.append(dict(section=sec, metal=metal, region='雅安', **it))
+                rows.append(dict(section=sec, metal=metal, region='成都', **it))
         elif ch in extra_map:
             extra[extra_map[ch]] = items
     return rows, qdate, fallback, extra
@@ -325,6 +325,29 @@ def sdjinshu_chengdu(want_date=None):
     return out
 
 
+def sd_chengdu_rows(sd):
+    """把山东金属网成都 dict 转成统一 rows。返回 (rows, qdate)。
+    cu_kg 里含「铝」的归废铝，其余归废铜（元/公斤）；steel_per_t 归废钢（元/吨）。"""
+    rows = []
+    if not sd:
+        return rows, None
+    for name, val in (sd.get('cu_kg') or {}).items():
+        sec = '废铝' if '铝' in name else '废铜'
+        rows.append({'name': name, 'low': val, 'high': val, 'dir': '', 'chg': None,
+                     'unit_raw': '公斤', 'section': sec, 'metal': sec[1:], 'region': '成都'})
+    for name, val in (sd.get('steel_per_t') or {}).items():
+        nm = name.replace('成都', '')
+        rows.append({'name': nm, 'low': val, 'high': val, 'dir': '', 'chg': None,
+                     'unit_raw': '吨', 'section': '废钢', 'metal': '钢', 'region': '成都'})
+    qdate = None
+    if sd.get('date'):
+        try:
+            qdate = dt.date.fromisoformat(sd['date'])
+        except ValueError:
+            qdate = None
+    return rows, qdate
+
+
 SINA_URL = ('https://hq.sinajs.cn/list=nf_CU0,nf_AL0,nf_ZN0,nf_PB0,nf_NI0,nf_SN0,'
             'nf_AU0,nf_AG0,nf_RB0,nf_SS0,nf_HC0,nf_I0')
 FUT_NAMES = {
@@ -369,13 +392,15 @@ def to_kg(values, unit_raw, section):
 
 # ============================ 组装 + 推送 ntfy ============================
 
-def build_payload(rows, qdate, fallback, futures):
-    """把雅安条目压成前端要用的纯 JSON（体积压到 ntfy 单条上限内）。"""
+def build_payload(rows, qdate, fallback, futures, low_src=None):
+    """把成都条目压成前端要用的纯 JSON（体积压到 ntfy 单条上限内）。
+    low_src：由 zgfp（过期偏低）来源填充的板块名集合，前端据此打「数值偏低」标签。"""
+    low_src = low_src or set()
     grouped = {}
     for r in rows:
         kg = to_kg([r['low'], r['high']], r['unit_raw'], r['section'])
         o = {'name': r['name'], 'low': kg[0], 'high': kg[1]}
-        # 元/吨前端可由元/公斤×1000 推出，不重复传；雅安源也没有涨跌字段
+        # 元/吨前端可由元/公斤×1000 推出，不重复传；成都源也没有涨跌字段
         if r.get('dir') or r.get('chg') is not None:
             chg_kg = r['chg'] / 1000 if r['unit_raw'] not in ('公斤', '千克') else r['chg']
             o['dir'] = r['dir']
@@ -386,7 +411,8 @@ def build_payload(rows, qdate, fallback, futures):
         items = grouped.get(sec) or []
         if not items:
             continue
-        secs.append({'name': sec, 'accent': ACCENT.get(sec, '#1f3b57'), 'rows': items})
+        secs.append({'name': sec, 'accent': ACCENT.get(sec, '#1f3b57'),
+                     'rows': items, 'low': sec in low_src})
     return {
         'quote_date': qdate.strftime('%Y-%m-%d') if qdate else '',
         'is_fallback': bool(fallback),
@@ -447,12 +473,34 @@ def publish(body):
 
 def main():
     log('=== 开始抓取（云端）===')
-    rows, qdate, fallback, extra = zgfp_yaan()
-    # 补充品类（废铁/铅/锌/纸）也归入 rows 一起展示
+    # 数据源策略：
+    #   山东金属网(sd) —— 成都铜/铝/钢，数值真实新鲜（与沪铜/沪铝期货吻合）
+    #   zgfp —— 品类齐全但报价过期偏低，仅用于补 不锈钢/铁/铅/锌/纸，并在页面标注「偏低」
+    zg_rows, zg_qdate, zg_fallback, extra = zgfp_chengdu()
+    sd = sdjinshu_chengdu()
+    sd_rows, sd_qdate = sd_chengdu_rows(sd)
+
+    low_src = set()
+    rows = []
+    if sd_rows:
+        rows.extend(sd_rows)                      # 真实铜/铝/钢
+        qdate, fallback = (sd_qdate or zg_qdate), zg_fallback
+        for r in zg_rows:                          # 不锈钢等非铜铝钢仍取 zgfp，标偏低
+            if r['section'] in ('废铜', '废铝', '废钢'):
+                continue
+            rows.append(r)
+            low_src.add(r['section'])
+    else:
+        rows = list(zg_rows)                       # 山东网没抓到，整体退回 zgfp（全部偏低）
+        qdate, fallback = zg_qdate, zg_fallback
+        low_src.update(r['section'] for r in rows)
+    # 补充品类（废铁/铅/锌/纸）来自 zgfp，标注偏低
     for sec, items in extra.items():
         for it in items:
-            rows.append(dict(section=sec, metal=sec, region='雅安', **it))
-    log('  雅安废料条目数:', len(rows), '报价日:', qdate)
+            rows.append(dict(section=sec, metal=sec, region='成都', **it))
+            low_src.add(sec)
+    log('  成都条目数:', len(rows), '(山东网真实:', len(sd_rows),
+        '/ zgfp补充:', len(rows) - len(sd_rows), ') 报价日:', qdate, '偏低板块:', sorted(low_src))
 
     futures = fetch_futures()
     log('  期货条数:', len(futures))
@@ -470,7 +518,7 @@ def main():
         prev['fetched_at'] = dt.datetime.now(CN_TZ).strftime('%m-%d %H:%M')
         payload = prev
     else:
-        payload = build_payload(rows, qdate, fallback, futures)
+        payload = build_payload(rows, qdate, fallback, futures, low_src)
 
     body = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
     log('  数据大小:', len(body), '字节')
