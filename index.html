@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><meta name="format-detection" content="telephone=no"><title>成都废料回收报价</title><style>
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><meta name="format-detection" content="telephone=no"><title>鎴愰兘搴熸枡鍥炴敹鎶ヤ环</title><style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{background:#eef2f6;color:#111827;padding:12px 12px 32px;-webkit-text-size-adjust:100%;
 font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB",
@@ -37,80 +37,80 @@ justify-content:space-between}
 .load{text-align:center;color:#6b7280;font-size:13px;padding:30px 0}
 .refresh{display:block;text-align:center;margin:16px auto 0;padding:11px;
 background:#0f2b46;color:#fff;border-radius:10px;font-size:14px;text-decoration:none}
-</style></head><body><div id="app"><div class="load">正在取今日报价…</div></div><script>
-var API = "https://ntfy.sh/scrap_price_sichuan_2026/json?poll=1&since=12h";
+</style></head><body><div id="app"><div class="load">姝ｅ湪鍙栦粖鏃ユ姤浠封€?/div></div><script>
+var API = "https://ntfy.sh/scrap_price_sichuan_2026/json?poll=1&since=20h";
 function esc(s){return String(s).replace(/[&<>]/g,function(c){
   return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
-function num(v){ if(v===null||v===undefined||v===''||isNaN(v)) return '—';
+function num(v){ if(v===null||v===undefined||v===''||isNaN(v)) return '鈥?;
   var n=Number(v);
   return Math.abs(n)>=1000 ? Math.round(n).toLocaleString('en-US')
                            : (Math.round(n*100)/100).toString(); }
 function chg(r){
-  if((r.dir!=='涨'&&r.dir!=='跌')&&(r.chg===null||r.chg===undefined||isNaN(r.chg))) return '';
+  if((r.dir!=='娑?&&r.dir!=='璺?)&&(r.chg===null||r.chg===undefined||isNaN(r.chg))) return '';
   var c=Math.abs(Number(r.chg)||0), t, cl;
-  if(r.dir==='涨'){t='▲'+num(c);cl='up';}
-  else if(r.dir==='跌'){t='▼'+num(c);cl='dn';}
-  else {t='持平';cl='fl';}
+  if(r.dir==='娑?){t='鈻?+num(c);cl='up';}
+  else if(r.dir==='璺?){t='鈻?+num(c);cl='dn';}
+  else {t='鎸佸钩';cl='fl';}
   return '<span class="c '+cl+'">'+t+'</span>';}
 function rows(list, withTon){
-  function rng(a,b){a=num(a);b=num(b);return a===b?a:(a+'–'+b);}
+  function rng(a,b){a=num(a);b=num(b);return a===b?a:(a+'鈥?+b);}
   var h='';
   for(var i=0;i<list.length;i++){var r=list[i];
     h+='<div class="r"><span class="n">'+esc(r.name)+'</span>'
       +'<span class="right"><span class="p">'+rng(r.low,r.high)
-      +'<small>元/公斤</small></span>'+chg(r)
+      +'<small>鍏?鍏枻</small></span>'+chg(r)
       +(withTon?('<span class="ton">'+rng(r.low_t!==undefined?r.low_t:r.low*1000,r.high_t!==undefined?r.high_t:r.high*1000)
-      +' 元/吨</span>'):'')+'</span></div>';}
+      +' 鍏?鍚?/span>'):'')+'</span></div>';}
   return h;}
 function render(d){
   var h='';
-  h+='<div class="hd"><h1>成都废料回收报价</h1><div class="d">'
-    +esc(d.quote_date)+' · 单价：元/公斤</div><div class="f">更新 '
+  h+='<div class="hd"><h1>鎴愰兘搴熸枡鍥炴敹鎶ヤ环</h1><div class="d">'
+    +esc(d.quote_date)+' 路 鍗曚环锛氬厓/鍏枻</div><div class="f">鏇存柊 '
     +esc(d.fetched_at)+'</div></div>';
-  if(d.is_fallback) h+='<div class="warn">当日报价尚未发布，以下为最近一期报价，非今日价。</div>';
+  if(d.is_fallback) h+='<div class="warn">褰撴棩鎶ヤ环灏氭湭鍙戝竷锛屼互涓嬩负鏈€杩戜竴鏈熸姤浠凤紝闈炰粖鏃ヤ环銆?/div>';
   var cu=null, i;
-  for(i=0;i<d.sections.length;i++) if(d.sections[i].name==='废铜') cu=d.sections[i];
+  for(i=0;i<d.sections.length;i++) if(d.sections[i].name==='搴熼摐') cu=d.sections[i];
   if(cu && cu.rows.length){
-    h+='<div class="cu"><h2>今日成都废铜回收价</h2>'+rows(cu.rows,false)+'</div>';}
+    h+='<div class="cu"><h2>浠婃棩鎴愰兘搴熼摐鍥炴敹浠?/h2>'+rows(cu.rows,false)+'</div>';}
   for(i=0;i<d.sections.length;i++){var s=d.sections[i];
-    if(s.name==='废铜'&&cu) continue;
+    if(s.name==='搴熼摐'&&cu) continue;
     if(!s.rows || !s.rows.length) continue;
     h+='<div class="card"><div class="sh" style="background:'+s.accent+'"><b>'
-      +esc(s.name)+(s.low?'<i style="font-style:normal;font-weight:400;font-size:10px;opacity:.85;margin-left:6px">数值偏低·供参考</i>':'')+'</b><span>'+s.rows.length+' 个品名 · 元/公斤</span></div>'
+      +esc(s.name)+(s.low?'<i style="font-style:normal;font-weight:400;font-size:10px;opacity:.85;margin-left:6px">鏁板€煎亸浣幝蜂緵鍙傝€?/i>':'')+'</b><span>'+s.rows.length+' 涓搧鍚?路 鍏?鍏枻</span></div>'
       +rows(s.rows,true)+'</div>';}
   var sd=d.chengdu||{};
   if((sd.cu&&sd.cu.length)||(sd.steel&&sd.steel.length)){
-    h+='<div class="mini"><b>成都现货参考（'+esc(sd.date)+'，元/公斤）</b>';
-    if(sd.cu&&sd.cu.length) h+=sd.cu.map(function(p){return esc(p[0])+' '+num(p[1]);}).join(' ｜ ');
-    if(sd.steel&&sd.steel.length) h+='<br>废钢：'+sd.steel.map(function(p){
-      return esc(p[0])+' '+num(p[1])+' 元/吨';}).join(' ｜ ');
+    h+='<div class="mini"><b>鎴愰兘鐜拌揣鍙傝€冿紙'+esc(sd.date)+'锛屽厓/鍏枻锛?/b>';
+    if(sd.cu&&sd.cu.length) h+=sd.cu.map(function(p){return esc(p[0])+' '+num(p[1]);}).join(' 锝?');
+    if(sd.steel&&sd.steel.length) h+='<br>搴熼挗锛?+sd.steel.map(function(p){
+      return esc(p[0])+' '+num(p[1])+' 鍏?鍚?;}).join(' 锝?');
     h+='</div>';}
   var fu=d.futures||[];
   if(fu.length){
-    h+='<div class="mini"><b>期货行情参考（现货基准，非废料价）</b><div class="fut">';
+    h+='<div class="mini"><b>鏈熻揣琛屾儏鍙傝€冿紙鐜拌揣鍩哄噯锛岄潪搴熸枡浠凤級</b><div class="fut">';
     for(i=0;i<fu.length;i++){var f=fu[i];var t,cl;
-      if(f.chg===null||f.chg===undefined||isNaN(f.chg)){t='—';cl='fl';}
-      else if(f.chg>0){t='▲'+Math.abs(f.pct).toFixed(2)+'%';cl='up';}
-      else if(f.chg<0){t='▼'+Math.abs(f.pct).toFixed(2)+'%';cl='dn';}
-      else {t='持平';cl='fl';}
-      var unit=(f.unit==='克')?'元/克':('元/'+f.unit);
+      if(f.chg===null||f.chg===undefined||isNaN(f.chg)){t='鈥?;cl='fl';}
+      else if(f.chg>0){t='鈻?+Math.abs(f.pct).toFixed(2)+'%';cl='up';}
+      else if(f.chg<0){t='鈻?+Math.abs(f.pct).toFixed(2)+'%';cl='dn';}
+      else {t='鎸佸钩';cl='fl';}
+      var unit=(f.unit==='鍏?)?'鍏?鍏?:('鍏?'+f.unit);
       h+='<div><span>'+esc(f.name)+' '+num(f.last)+'</span><span class="'+cl
         +'" style="font-size:12px">'+t+'</span></div>';}
     h+='</div></div>';}
-  h+='<div class="foot">铜 / 铝 / 钢 来源：山东金属网·成都每日报价（实时）；'
-    +'不锈钢 / 铁 / 铅 / 锌 / 纸 来源：中国废品网 zgfp.com（数值偏低，仅供参考） ／ 新浪财经<br>'
-    +'废料价为厂家挂牌收购区间，实际成交按品相、含量、地区议价。</div>';
-  h+='<a class="refresh" href="javascript:location.reload()">刷新报价</a>';
+  h+='<div class="foot">閾?/ 閾?鏉ユ簮锛氬簾閲戝睘璧勮缃懧峰洓宸濇瘡鏃ヨ鎯咃紙瀹炴椂锛夛紱'
+    +'閽?/ 涓嶉攬閽?/ 閾?/ 閾?/ 閿?/ 绾?鏉ユ簮锛氫腑鍥藉簾鍝佺綉 zgfp.com锛堟暟鍊煎亸浣庯紝浠呬緵鍙傝€冿級 锛?鏂版氮璐㈢粡<br>'
+    +'搴熸枡浠蜂负鍘傚鎸傜墝鏀惰喘鍖洪棿锛屽疄闄呮垚浜ゆ寜鍝佺浉銆佸惈閲忋€佸湴鍖鸿浠枫€?/div>';
+  h+='<a class="refresh" href="javascript:location.reload()">鍒锋柊鎶ヤ环</a>';
   document.getElementById('app').innerHTML=h;}
 function fail(e){
-  document.getElementById('app').innerHTML='<div class="warn">暂时取不到今日报价'
-    +'（数据服务没响应），请过一会儿刷新本页。<br>'+esc(e)+'</div>';}
-// 数据层是 ntfy 的 NDJSON：一行一条消息，取最后一条（最新）解析
+  document.getElementById('app').innerHTML='<div class="warn">鏆傛椂鍙栦笉鍒颁粖鏃ユ姤浠?
+    +'锛堟暟鎹湇鍔℃病鍝嶅簲锛夛紝璇疯繃涓€浼氬効鍒锋柊鏈〉銆?br>'+esc(e)+'</div>';}
+// 鏁版嵁灞傛槸 ntfy 鐨?NDJSON锛氫竴琛屼竴鏉℃秷鎭紝鍙栨渶鍚庝竴鏉★紙鏈€鏂帮級瑙ｆ瀽
 fetch(API+(API.indexOf('?')<0?'?':'&')+'_='+Date.now(),{cache:'no-store'})
   .then(function(r){return r.text();})
   .then(function(t){
     var lines=t.split('\n').filter(function(x){return x.trim();});
-    if(!lines.length) throw new Error('还没有数据，等明天早上更新');
+    if(!lines.length) throw new Error('杩樻病鏈夋暟鎹紝绛夋槑澶╂棭涓婃洿鏂?);
     var o=JSON.parse(lines[lines.length-1]);
     var d=JSON.parse(o.message);
     render(d);})
