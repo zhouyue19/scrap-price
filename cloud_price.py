@@ -348,6 +348,89 @@ def sd_chengdu_rows(sd):
     return rows, qdate
 
 
+# ============================ 废金属资讯网 四川废铜废铝（主源，元/吨） ============================
+# feijs.com 每日发布各省废铜废铝报价，数值真实新鲜（与沪铜/沪铝期货吻合）。
+# 其列表页不可访问，文章 ID 连续递增，故用「指数探测最大 ID + 向前扫描标题」定位最新一篇四川文章。
+FEIJS_VIEW = 'http://www.feijs.com/news/news_detail.asp?class=ftfl&id={id}'
+FEIJS_SEED_ID = 901849  # 2026-11-26 四川文章，作为探测锚点（ID 只增不减，永久有效）
+FEIJS_TITLE_RE = re.compile(r'font20s[^>]*>([^<]{4,80})', re.S)
+FEIJS_DATE_RE = re.compile(r'(\d{4})/(\d{1,2})/(\d{1,2})')
+FEIJS_BODY_RE = re.compile(r'<FONT[^>]*size=4[^>]*>(.*?)</DIV>', re.S | re.I)
+
+
+def feijs_article(iid):
+    """抓取指定 ID 的文章，返回 (title, qdate, body)；无效返回 None。"""
+    html = fetch(FEIJS_VIEW.format(id=iid), encoding='gbk')
+    if not html:
+        return None
+    tm = FEIJS_TITLE_RE.search(html)
+    if not tm:
+        return None
+    title = tm.group(1).strip()
+    qdate = None
+    dm = FEIJS_DATE_RE.search(html)
+    if dm:
+        try:
+            qdate = dt.date(int(dm.group(1)), int(dm.group(2)), int(dm.group(3)))
+        except ValueError:
+            pass
+    body = ''
+    bm = FEIJS_BODY_RE.search(html)
+    if bm:
+        body = re.sub(r'<BR\s*/?>', '\n', bm.group(1), flags=re.I)
+        body = re.sub(r'<[^>]+>', '', body).replace('&nbsp;', ' ').strip()
+    return title, qdate, body
+
+
+def feijs_max_id(seed=FEIJS_SEED_ID):
+    """指数探测当前最大有效文章 ID。"""
+    if not feijs_article(seed):
+        for i in range(seed, max(1, seed - 200), -1):  # 锚点失效时向前找最近有效 ID
+            if feijs_article(i):
+                seed = i
+                break
+        else:
+            return None
+    hi, step, stall = seed, 16, 0
+    while step >= 1 and stall < 3:
+        if feijs_article(hi + step):
+            hi += step
+            step = min(step * 2, 8192)
+            stall = 0
+        else:
+            step //= 2
+            stall += 1
+    return hi
+
+
+def feijs_sichuan(want_date=None):
+    """返回 (rows, qdate, fallback)。四川废铜废铝当日行情，单位元/吨。"""
+    hi = feijs_max_id()
+    if hi is None:
+        return [], None, True
+    target = want_date or dt.datetime.now(CN_TZ).date()
+    found = None
+    for iid in range(hi, max(1, hi - 120) - 1, -1):
+        art = feijs_article(iid)
+        if not art:
+            continue
+        title, qdate, body = art
+        if '四川' in title and '废铜' in title:
+            found = (qdate, body)
+            break
+    if not found:
+        return [], None, True
+    qdate, body = found
+    rows = []
+    for line in body.split('\n'):
+        for it in parse_items(line.strip()):
+            if not it['name']:
+                continue
+            sec = '废铝' if '铝' in it['name'] else '废铜'
+            rows.append(dict(section=sec, metal=sec[1:], region='四川', **it))
+    return rows, qdate, (qdate is not None and qdate < target)
+
+
 SINA_URL = ('https://hq.sinajs.cn/list=nf_CU0,nf_AL0,nf_ZN0,nf_PB0,nf_NI0,nf_SN0,'
             'nf_AU0,nf_AG0,nf_RB0,nf_SS0,nf_HC0,nf_I0')
 FUT_NAMES = {
@@ -474,24 +557,24 @@ def publish(body):
 def main():
     log('=== 开始抓取（云端）===')
     # 数据源策略：
-    #   山东金属网(sd) —— 成都铜/铝/钢，数值真实新鲜（与沪铜/沪铝期货吻合）
-    #   zgfp —— 品类齐全但报价过期偏低，仅用于补 不锈钢/铁/铅/锌/纸，并在页面标注「偏低」
+    #   废金属资讯网(feijs) —— 四川废铜/废铝，数值真实新鲜（与沪铜/沪铝期货吻合），主源
+    #   zgfp —— 品类齐全但报价过期偏低，仅用于补 钢/不锈钢/铁/铅/锌/纸，并在页面标注「偏低」
+    #   旧主源「山东金属网」已失效（404），不再使用。
     zg_rows, zg_qdate, zg_fallback, extra = zgfp_chengdu()
-    sd = sdjinshu_chengdu()
-    sd_rows, sd_qdate = sd_chengdu_rows(sd)
+    fj_rows, fj_qdate, fj_fallback = feijs_sichuan()
 
     low_src = set()
     rows = []
-    if sd_rows:
-        rows.extend(sd_rows)                      # 真实铜/铝/钢
-        qdate, fallback = (sd_qdate or zg_qdate), zg_fallback
-        for r in zg_rows:                          # 不锈钢等非铜铝钢仍取 zgfp，标偏低
-            if r['section'] in ('废铜', '废铝', '废钢'):
+    if fj_rows:
+        rows.extend(fj_rows)                       # 真实四川废铜/废铝行情
+        qdate, fallback = (fj_qdate or zg_qdate), fj_fallback
+        for r in zg_rows:                          # 钢等非铜铝品类仍取 zgfp，标偏低
+            if r['section'] in ('废铜', '废铝'):
                 continue
             rows.append(r)
             low_src.add(r['section'])
     else:
-        rows = list(zg_rows)                       # 山东网没抓到，整体退回 zgfp（全部偏低）
+        rows = list(zg_rows)                       # feijs 没抓到，退回 zgfp（全部偏低）
         qdate, fallback = zg_qdate, zg_fallback
         low_src.update(r['section'] for r in rows)
     # 补充品类（废铁/铅/锌/纸）来自 zgfp，标注偏低
@@ -499,8 +582,8 @@ def main():
         for it in items:
             rows.append(dict(section=sec, metal=sec, region='成都', **it))
             low_src.add(sec)
-    log('  成都条目数:', len(rows), '(山东网真实:', len(sd_rows),
-        '/ zgfp补充:', len(rows) - len(sd_rows), ') 报价日:', qdate, '偏低板块:', sorted(low_src))
+    log('  成都条目数:', len(rows), '(feijs行情:', len(fj_rows),
+        '/ zgfp补充:', len(rows) - len(fj_rows), ') 报价日:', qdate, '偏低板块:', sorted(low_src))
 
     futures = fetch_futures()
     log('  期货条数:', len(futures))
